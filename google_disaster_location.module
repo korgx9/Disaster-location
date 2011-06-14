@@ -445,6 +445,9 @@ function google_disaster_location_page() {
     $output .= '<div id="google_disaster_location_body_text"><ul><li>Latest disasters from '. $date .' in <a onclick="popupMessage()" href="#">selected countries</a></li>';
     $output .= '<li>Please click on the icons on the map to get detailed information about the disaster</li></ul></div>';
   }
+  else {
+    drupal_set_message('No recent disasters to show', 'info');
+  }
   $output .= '<fieldset style="height:'.$height.';width:75px;float:left"><div id="google_disaster_location_legend"><table style="height:'.$height.';text-align:center;width:75px;">';
   $output .= '<a href="">Reset Map</a>';
   if(count($earthquakes) > 0) {
@@ -774,7 +777,7 @@ function google_disaster_location_block($op = 'list', $delta = 0, $edit = array(
       $form = array();
       $form['info']['google_disaster_location_texttop_filter']['google_disaster_location_texttop'] = array(
         '#type' => 'textarea',
-        '#title' => t('Additional text to show above the image'),
+        '#title' => t('Additional text to show below the image'),
         '#default_value' => variable_get('google_disaster_location_block_text_top', '')
       );
       $form['info']['google_disaster_location_texttop_filter']['format'] = filter_form(FILTER_FORMAT_DEFAULT, null, $parents=array('info', 'google_disaster_location_texttop_filter','format'));
@@ -788,13 +791,12 @@ function google_disaster_location_block($op = 'list', $delta = 0, $edit = array(
         case 'image':
           global $base_url;
           $texttop = variable_get('google_disaster_location_block_text_top', '');
-          $texttop = ($texttop == true) ? '<div id="google_disaster_location-block-text-top">'.variable_get('google_disaster_location_block_top_text', '').'</div>' : '';
+          $texttop = ($texttop != '') ? '<div id="google_disaster_location-block-text-bottom">'.$texttop.'</div>' : '';
           $display_earthquakes = variable_get('google_disaster_location_type_earthquakes', 0);
           $display_floods = variable_get('google_disaster_location_type_floods', 0);
           $display_volcanoes = variable_get('google_disaster_location_type_volcanoes', 0);
           $block['subject'] = variable_get('google_disaster_location_title', t('World Recent Disasters'));
-          $block['content'] = $texttop.$block['content'];
-          $block['content'] .= theme('google_disaster_location_block_links');
+          $block['content'] .= theme('google_disaster_location_block_links').$texttop;
           $block['content'] = google_disaster_location_block_image().$block['content'];
           $block_refresh_time = variable_get('google_disaster_location_earthquakes_block_refresh', '60');
           drupal_add_js('function autoupdate() {
@@ -879,8 +881,6 @@ function theme_google_disaster_location_block_links() {
 
   $disasters = array_merge($eurquakes_data, $floods_data, $volcanoes_data);
   if(count($disasters)==0) {
-    if(drupal_get_path_alias(check_plain($_GET['q'])) == 'google_disaster_location')
-      drupal_set_message('No recent disasters to show', 'info');
     return '<p>No recent disasters to show</p>';
   }
   rsort($disasters);
