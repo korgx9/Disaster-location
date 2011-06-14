@@ -1,0 +1,904 @@
+<?php
+
+/**
+ * Implementation of hook_menu().
+ */
+function google_disaster_location_menu() {
+  $items = array();
+  $items['admin/settings/google_disaster_location'] = array(
+    'title' => 'World recent disaster location',
+    'description' => 'Configure Google Maps and Disasters displaying details.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('google_disaster_location_admin_settings'),
+    'access callback' => 'user_access',
+    'access arguments' => array('administer google_disaster_location'),
+    'type' => MENU_NORMAL_ITEM,
+  );
+  $items['google_disaster_location'] = array('title' => 'World Recent Disasters',
+    'page callback' => 'google_disaster_location_page',
+    'access arguments' => array('browse google_disaster_location'),
+    'type' => MENU_NORMAL_ITEM,
+  );
+  $items['google_disaster_location/view'] = array(
+    'title' => 'View',
+    'access arguments' => array('browse google_disaster_location'),
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+    'weight' => -10
+  );
+  $items['google_disaster_location/edit'] = array(
+    'title' => 'Edit',
+    'description' => 'Configure Google Maps location.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('google_disaster_location_admin_settings'),
+    'access callback' => 'user_access',
+    'access arguments' => array('administer google_disaster_location'),
+    'type' => MENU_LOCAL_TASK,
+  );
+  $items['google_disaster_location/update'] = array(
+    'path' => 'google_disaster_location/update',
+    'page callback' => 'google_disaster_location_update',
+    'access arguments' => array('browse google_disaster_location'),
+    'type' => MENU_CALLBACK,
+  );
+  return $items;
+}
+/**
+* Implementation of hook_cron().
+*
+* download feeds 
+*/
+//function google_disaster_location_cron() {
+/*$myvar = variable_get('mycronrunsfor', 0);
+$myvar++;
+variable_set('mycronrunsfor', $myvar);
+  watchdog('cron', "Hello cron hooked for". $myvar ."times", WATCHDOG_WARNING);*/
+//}
+
+/* 
+*
+*/
+function get_usa_states() {
+  $path = drupal_get_path('module', 'google_disaster_location');
+  $file = $path.'/usa_states.txt';
+  if (!($fp = @fopen($file, "r")) || (0 == filesize($file))) {
+    drupal_set_message('Please, check file with list of USA states','error');
+  }
+  else
+  {
+    while(!feof($fp)) {
+      $line = trim(fgets($fp, 100));
+      if($line == FALSE)break;
+      $usa_states[] = $line;
+    }
+  }
+  return $usa_states; 
+}
+
+/* */
+function get_countries() {
+  $path = drupal_get_path('module', 'google_disaster_location');
+  $file = $path.'/countries.txt';
+  if (!($fp = @fopen($file, "r")) || (0 == filesize($file))) {
+    drupal_set_message('Please, check file with list of countries','error');
+  }
+  else
+  {
+    while(!feof($fp)) {
+      $line = trim(fgets($fp, 100));
+      if($line == FALSE)break;
+      $line = explode('|', $line);
+      $countries[$line[0]] = $line[1];
+
+    }
+  }
+  return $countries;
+}
+
+/* */
+function google_disaster_location_init() {
+  @get_feeds();// TODO check if it necessary 
+  drupal_add_css(drupal_get_path('module', 'google_disaster_location') .'/google_disaster_location.css');
+}
+
+/* */
+function google_disaster_location_admin_settings_validate($form, &$form_state) {
+  if($form_state['values']['google_disaster_location_earthquakes_feeds'] != '') {
+    variable_set('google_disaster_location_earthquakes_feeds', $form_state['values']['google_disaster_location_earthquakes_feeds']);
+    @get_feeds();
+  }
+  if($form_state['values']['google_disaster_location_floods_feeds'] != '') {
+    variable_set('google_disaster_location_floods_feeds', $form_state['values']['google_disaster_location_floods_feeds']);
+    @get_feeds();// TODO check if it necessary 
+  }
+  if($form_state['values']['google_disaster_location_volcanoes_feeds'] != '') {
+    variable_set('google_disaster_location_volcanoes_feeds', $form_state['values']['google_disaster_location_volcanoes_feeds']);
+    @get_feeds();// TODO check if it necessary 
+  }
+}
+
+/**
+ * Callback for admin settings page
+ */
+function google_disaster_location_admin_settings() {
+  $form['disasters_type'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Choose Disaster type to display'),
+    '#collapsible' => TRUE);
+  $form['disasters_type']['google_disaster_location_type_earthquakes'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Earthquakes'),
+    '#default_value' => variable_get('google_disaster_location_type_earthquakes', FALSE),
+    );
+  $form['disasters_type']['google_disaster_location_type_floods'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Floods'),
+    '#default_value' => variable_get('google_disaster_location_type_floods', FALSE),
+    );
+  $form['disasters_type']['google_disaster_location_type_volcanoes'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Volcanoes'),
+    '#default_value' => variable_get('google_disaster_location_type_volcanoes', FALSE),
+    );
+  $form['disasters_type']['google_disaster_location_earthquakes_block_refresh'] = array('#type' => 'textfield',
+    '#title' => t('Disasters block autorefresh time'),
+    '#default_value' => variable_get('google_disaster_location_earthquakes_block_refresh', '5'),
+    '#field_suffix' => 'minutes',
+    '#description' => NULL,
+    '#size' => 3,
+  );
+  $form['disasters_type']['google_disaster_location_block_map_width'] = array('#type' => 'textfield',
+    '#title' => t('Block map width'),
+    '#default_value' => variable_get('google_disaster_location_block_map_width', '200'),
+    '#field_suffix' => 'px',
+    '#description' => NULL,
+    '#size' => 10,
+    );
+  $form['disasters_type']['google_disaster_location_block_map_height'] = array('#type' => 'textfield',
+    '#title' => t('Block map height'),
+    '#default_value' => variable_get('google_disaster_location_block_map_height', '150'),
+    '#field_suffix' => 'px',
+    '#description' => NULL,
+    '#size' => 10,
+    );
+  $form['info'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Map Settings'),
+    '#collapsible' => FALSE,
+    );
+  $form['info']['google_disaster_location_title'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Title'),
+    '#default_value' => variable_get('google_disaster_location_title', t('World Recent Disasters')),
+    '#description' => t("The title of the automatically generated "). l(t('map page'), 'google_disaster_location') . '.',
+  );
+  $form['info']['google_disaster_location_type'] = array(
+    '#type' => 'select',
+    '#title' => t('Map type'),
+    '#default_value' => variable_get('google_disaster_location_type', 'roadmap'),
+    '#description' => NULL,
+    '#options' => array(
+      'roadmap' => 'display the normal, default 2D tiles of Google Maps',
+      'satellite' => 'display photographic tiles',
+      'hybrid' => 'display a mix of photographic tiles and a tile layer',
+      'terrain' => 'display physical relief tiles')
+  );
+  $zoom_levels = array('0' => t('0 - minimum zoom level, whole world'));
+  for ($i = 1; $i<17; $i++) $zoom_levels["$i"] = "$i";
+  $zoom_levels['17'] = t('17 - maximum zoom level');
+  $form['info']['google_disaster_location_zoom'] = array('#type' => 'select',
+    '#title' => t('Map zoom level'),
+    '#default_value' => variable_get('google_disaster_location_zoom', '2'),
+    '#description' => NULL,
+    '#options' => $zoom_levels,
+    );
+  $form['info']['google_disaster_location_width'] = array('#type' => 'textfield',
+    '#title' => t('Map Width'),
+    '#default_value' => variable_get('google_disaster_location_width', '400'),
+    '#field_suffix' => 'px',
+    '#description' => NULL,
+    '#size' => 10,
+    );
+  $form['info']['google_disaster_location_height'] = array('#type' => 'textfield',
+    '#title' => t('Map Height'),
+    '#default_value' => variable_get('google_disaster_location_height', '320'),
+    '#field_suffix' => 'px',
+    '#description' => NULL,
+    '#size' => 10,
+    );
+  $form['info']['google_disaster_location_body_filter']['google_disaster_location_body'] = array('#type' => 'textarea',
+    '#required' => FALSE,
+    '#title' => t('Additional information (displayed above map)'),
+    '#default_value' => variable_get('google_disaster_location_body', ''),
+    '#description' => t('Any additional information that you would like to include above the map.')
+  );
+  $form['info']['google_disaster_location_body_filter']['format'] = filter_form(FILTER_FORMAT_DEFAULT, null, $parents=array('info', 'google_disaster_location_body_filter', 'format'));
+  $form['info']['google_disaster_location_footer_filter']['google_disaster_location_footer'] = array('#type' => 'textarea',
+    '#required' => FALSE,
+    '#title' => t('Additional information (displayed below map)'),
+    '#default_value' => variable_get('google_disaster_location_footer', ''),
+    '#description' => t('Any additional information you would like to include below the map.')
+  );
+  $form['info']['google_disaster_location_footer_filter']['format'] = filter_form(FILTER_FORMAT_DEFAULT, null, $parents=array('info', 'google_disaster_location_footer_filter', 'format'));
+// Earthquakes details
+  $form['earthquakes_info'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Earthquakes information filters'),
+    '#collapsible' => TRUE,
+    '#collapsed' => !(variable_get('google_disaster_location_type_earthquakes', FALSE)),
+  );
+  $form['earthquakes_info']['google_disaster_location_earthquakes_feeds'] = array('#type' => 'textfield',
+    '#required' => variable_get('google_disaster_location_type_earthquakes', FALSE),
+    '#title' => t('Please, add earthquake feed URL'),
+    '#default_value' => variable_get('google_disaster_location_earthquakes_feeds', NULL),
+    '#description' => 'Recommended feed: http://earthquake.usgs.gov/earthquakes/catalogs/eqs7day-M2.5.xml',
+    '#options' => $options,
+  );
+  $earthquake_count = array('0' => t('Display nothing'));
+  for ($i = 1; $i<26; $i++) $earthquake_count["$i"] = "$i";
+  $form['earthquakes_info']['google_disaster_location_earthquakes_count'] = array('#type' => 'select',
+    '#title' => t('Total number of earthquake to be displayed in the map'),
+    '#default_value' => variable_get('google_disaster_location_earthquakes_count', '5'),
+    '#description' => NULL,
+    '#options' => $earthquake_count,
+  );
+  $earthquake_count = array('0' => t('Display nothing'));
+  for ($i = 1; $i < 11; $i++) $earthquake_count["$i"] = "$i";
+  $form['earthquakes_info']['google_disaster_location_earthquakes_count_link'] = array('#type' => 'select',
+    '#title' => t('Total number of earthquakes links to be displayed in the block'),
+    '#default_value' => variable_get('google_disaster_location_earthquakes_count_link', '5'),
+    '#description' => NULL,
+    '#options' => $earthquake_count,
+  );
+  for ($i = 1; $i<=10; $i++) $earthquake_magnitude["$i"] = "$i";
+  $form['earthquakes_info']['google_disaster_location_earthquakes_magnitude'] = array('#type' => 'select',
+    '#title' => t('Display Earthquakes from magnitude'),
+    '#default_value' => variable_get('google_disaster_location_earthquakes_magnitude', '2'),
+    '#description' => NULL,
+    '#options' => $earthquake_magnitude,
+  );
+  $form['earthquakes_info']['google_disaster_location_earthquakes_filter_by_countries'] = array('#type' => 'select',
+    '#title' => t('Filter data by countries'),
+    '#default_value' => variable_get('google_disaster_location_earthquakes_filter_by_countries', ''),
+    '#multiple' => true,
+    '#description' => NULL,
+    '#options' => get_countries(),
+  );
+// Floods details
+  $form['floods_info'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Floods information filters'),
+    '#collapsible' => TRUE,
+    '#collapsed' => !(variable_get('google_disaster_location_type_floods', FALSE)),
+  );
+  $form['floods_info']['google_disaster_location_floods_feeds'] = array('#type' => 'textfield',
+    '#required' => variable_get('google_disaster_location_type_floods', FALSE),
+    '#title' => t('Please, add floods feed URL'),
+    '#default_value' => variable_get('google_disaster_location_floods_feeds', NULL),
+    '#description' => 'Recommended feed: http://www.gdacs.org/xml/RSSFL2.xml',
+  );
+  $floods_count = array('0' => t('Display nothing'));
+  for ($i = 1; $i<26; $i++) $floods_count["$i"] = "$i";
+  $form['floods_info']['google_disaster_location_floods_count'] = array('#type' => 'select',
+    '#title' => t('Total number of floods to be displayed in the map'),
+    '#default_value' => variable_get('google_disaster_location_floods_count', '5'),
+    '#description' => NULL,
+    '#options' => $floods_count,
+  );
+  $floods_count = array('0' => t('Display nothing'));
+  for ($i = 1; $i < 11; $i++) $floods_count["$i"] = "$i";
+  $form['floods_info']['google_disaster_location_floods_count_link'] = array('#type' => 'select',
+    '#title' => t('Total number of floods links to be displayed in the block'),
+    '#default_value' => variable_get('google_disaster_location_floods_count_link', '5'),
+    '#description' => NULL,
+    '#options' => $floods_count,
+  );
+  for ($i = 1; $i<=10; $i++) $flood_magnitude["$i"] = "$i";
+  $form['floods_info']['google_disaster_location_floods_magnitude'] = array('#type' => 'select',
+    '#title' => t('Display Floods from magnitude'),
+    '#default_value' => variable_get('google_disaster_location_floods_magnitude', '2'),
+    '#description' => NULL,
+    '#options' => $flood_magnitude,
+  );
+  $form['floods_info']['google_disaster_location_floods_filter_by_countries'] = array('#type' => 'select',
+    '#title' => t('Filter data by countries'),
+    '#default_value' => variable_get('google_disaster_location_floods_filter_by_countries', ''),
+    '#multiple' => true,
+    '#description' => NULL,
+    '#options' => get_countries(),
+  );
+// Volcanoes details
+  $form['volcanoes_info'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Volcanoes information filters'),
+    '#collapsible' => TRUE,
+    '#collapsed' => !(variable_get('google_disaster_location_type_volcanoes', FALSE)),
+  );
+  $form['volcanoes_info']['google_disaster_location_volcanoes_feeds'] = array('#type' => 'textfield',
+    '#required' => variable_get('google_disaster_location_type_volcanoes', FALSE),
+    '#title' => t('Please, add volcanoes feed URL'),
+    '#default_value' => variable_get('google_disaster_location_volcanoes_feeds', NULL),
+    '#description' => 'Recommended feed: http://www.volcano.si.edu/news/WeeklyVolcanoRSS.xml',
+  );
+  $volcanoes_count = array('0' => t('Display nothing'));
+  for ($i = 1; $i<26; $i++) $volcanoes_count["$i"] = "$i";
+  $form['volcanoes_info']['google_disaster_location_volcanoes_count'] = array('#type' => 'select',
+    '#title' => t('Total number of volcanoes to be displayed in the map'),
+    '#default_value' => variable_get('google_disaster_location_volcanoes_count', '5'),
+    '#description' => NULL,
+    '#options' => $volcanoes_count,
+  );
+  $volcanoes_count = array('0' => t('Display nothing'));
+  for ($i = 1; $i < 11; $i++) $volcanoes_count["$i"] = "$i";
+  $form['volcanoes_info']['google_disaster_location_volcanoes_count_link'] = array('#type' => 'select',
+    '#title' => t('Total number of volcanoes links to be displayed in the block'),
+    '#default_value' => variable_get('google_disaster_location_volcanoes_count_link', '5'),
+    '#description' => NULL,
+    '#options' => $volcanoes_count,
+  );
+  $form['volcanoes_info']['google_disaster_location_volcanoes_filter_by_countries'] = array('#type' => 'select',
+    '#title' => t('Filter volcanoes by countries'),
+    '#default_value' => variable_get('google_disaster_location_volcanoes_filter_by_countries', ''),
+    '#multiple' => true,
+    '#description' => NULL,
+    '#options' => get_countries(),
+  );
+
+  $form['#validate'][] = 'google_disaster_location_admin_settings_validate';
+  return system_settings_form($form);
+}
+
+/**
+ * Implementation of hook_perm().
+ */
+function google_disaster_location_perm() {
+  return array('administer google_disaster_location', 'browse google_disaster_location');
+}
+
+/** 
+ * Menu callback; generate an page with Google Maps.
+ */
+function google_disaster_location_page() {
+  global $base_root;
+  $google_disaster_location_title = variable_get('google_disaster_location_title', t('World Recent Earthquakes'));
+  $google_disaster_location_body = variable_get('google_disaster_location_body', '');
+  $google_disaster_location_footer = variable_get('google_disaster_location_footer', '');
+  $path = drupal_get_path('module', 'google_disaster_location');
+  $map_center = arg();
+  $display_earthquakes = variable_get('google_disaster_location_type_earthquakes', 0);
+  $display_floods = variable_get('google_disaster_location_type_floods', 0);
+  $display_volcanoes = variable_get('google_disaster_location_type_volcanoes', 0);
+  $earthquakes = $floods = $volcanoes = array();
+  $date_last[0] = $date_last[1] = $date_last[2] = FALSE;
+  $all_countries = get_countries();
+  $selected_countries_by_name = '<div style="width: 50px; height: 22px; float:left;"><strong>Display</strong></div><div style="cursor: pointer; float: right;" onclick="popupClose()">[X]</div>';
+  $selected_countries_by_name .= '<div style="height: 180px; width: 300px; overflow: auto;">';
+  drupal_set_html_head('<script src="http://maps.google.com/maps/api/js?v=3.3&sensor=false" type="text/javascript"></script>');
+  drupal_add_js($path . '/google_disaster_location.js');
+  //map common configuration
+  $map_config = array('zoom' => variable_get('google_disaster_location_zoom', 4), 'type' => variable_get('google_disaster_location_type', 'roadmap'), 'display_count' => $display_count, 'Lat' => (isset($map_center[1]) ? $map_center[1] : 0), 'Lon' => (isset($map_center[2]) ? $map_center[2] : 0));
+  drupal_add_js(array('map_config' => $map_config), 'setting');
+  drupal_add_js(array('path_to_module' => $base_root.url().$path), 'setting');
+
+//  sending earthquakes data
+  if($display_earthquakes) {
+    $earthquakes = get_earthrquakes_info();
+    drupal_add_js(array('earthquakes_data' => $earthquakes), 'setting');
+    $date_last[0] = $earthquakes[count($earthquakes) - 1]['unixtime'];
+    $selected_countries = variable_get('google_disaster_location_earthquakes_filter_by_countries', '*');
+    $selected_countries_by_name .= 'earthquakes in:<ul>';
+    if(!empty($selected_countries)) {
+      foreach($selected_countries as $key) {
+        $selected_countries_by_name .= '<li>'.$all_countries[$key]."</li>";
+      }
+    }
+    else $selected_countries_by_name .= 'all countries';
+    $selected_countries_by_name .= '</ul>';
+  }
+//  sending floods data
+  if ($display_floods) {
+    $floods = get_floods_info();
+    sort($floods);
+    drupal_add_js(array('floods_data' => get_floods_info()), 'setting');
+    $date_last[1] = $floods[0]['unixtime'];
+    $selected_countries = variable_get('google_disaster_location_floods_filter_by_countries', '*');
+    $selected_countries_by_name .= 'floods in:<ul>';
+    if(!empty($selected_countries)) {
+      foreach($selected_countries as $key) {
+        $selected_countries_by_name .= '<li>'.$all_countries[$key]."</li>";
+      }
+    }
+    else $selected_countries_by_name .= 'all countries';
+    $selected_countries_by_name .= '</ul>';
+  }
+// sending volcanoes
+  if ($display_volcanoes) {
+    $volcanoes = get_volcanoes_info();
+    drupal_add_js(array('volcanoes_data' => $volcanoes), 'setting');
+    $date_last[2] = $volcanoes[count($volcanoes) - 1]['unixtime'];
+    $selected_countries = variable_get('google_disaster_location_volcanoes_filter_by_countries', '*');
+    $selected_countries_by_name .= 'volcanoes in:<ul>';
+    if (!empty($selected_countries)) {
+      foreach($selected_countries as $key) {
+        $selected_countries_by_name .= '<li>'.$all_countries[$key]."</li>";
+      }
+    }
+    else $selected_countries_by_name .= 'all countries';
+    $selected_countries_by_name .= '</ul>';
+  }
+
+  drupal_set_title($google_disaster_location_title);
+  $height = variable_get('google_disaster_location_height', '600') - 16 . 'px';
+  for ($i = 0; $i < 3; $i++) {
+    if ($date_last[$i] != FALSE) {
+      $date[] = $date_last[$i];
+    }
+  }
+
+  if (!is_null($date))
+    sort($date);
+
+  if ($google_disaster_location_settings['info']) $google_disaster_location_settings['info'] = $google_disaster_location_settings['address'];
+    $output .= "<div id='google_disaster_location_body'>" . $google_disaster_location_body . "</div>";
+  
+  if (!empty($earthquakes) || !empty($floods) || !empty($volcanoes)) {
+    $date = date("d F Y", $date[0]);
+    $output .= '<div id="google_disaster_location_body_text"><ul><li>Latest disasters from '. $date .' in <a onclick="popupMessage()" href="#">selected countries</a></li>';
+    $output .= '<li>Please click on the icons on the map to get detailed information about the disaster</li></ul></div>';
+  }
+  $output .= '<fieldset style="height:'.$height.';width:75px;float:left"><div id="google_disaster_location_legend"><table style="height:'.$height.';text-align:center;width:75px;">';
+  $output .= '<a href="">Reset Map</a>';
+  if(count($earthquakes) > 0) {
+    $output .= '<tr><td height="33%"><img src="'.url().'sites/all/modules/google_disaster_location/img/earthquake.png"><br>earthquakes</td></tr>';
+  }
+  if(count($floods) > 0) {
+    $output .= '<tr><td  height="33%"><img src="'.url().'sites/all/modules/google_disaster_location/img/flood.png"><br>floods</td></tr>';
+  }
+  if(count($volcanoes) > 0) {
+    $output .= '<tr><td  height="33%"><img src="'.url().'sites/all/modules/google_disaster_location/img/volcano.png"><br>volcanoes</td></tr>';
+  }
+  $output .= '</table></div></fieldset>';
+  $output .= theme('google_disaster_location_map');
+  $output .= '<div id="google_disaster_location_footer">' . $google_disaster_location_footer . '</div>';
+  $output .= '<div id="popuup_div" class="popup_msg">'.$selected_countries_by_name.'</div></div>';
+  return $output;
+}
+
+/* 
+* Reading from rss earthrquakes data
+*/
+function get_earthrquakes_info($count = NULL) {
+  $xmldata = variable_get('google_disaster_location_path_to_earthquakes_data', '');
+  if(!empty($xmldata))
+  {
+    $all_countries = get_countries();
+    $selected_countries = variable_get('google_disaster_location_earthquakes_filter_by_countries', '*');
+    $data_parsed = array();
+    $selected_countries_by_name = NULL;
+    if($selected_countries != '*') {
+      foreach($selected_countries as $key) {
+        if($key == 'US') {
+          $usa_states = implode("|", get_usa_states());
+          $selected_countries_by_name .= $usa_states.'|';
+        }
+        $selected_countries_by_name .= addslashes($all_countries[$key])."|";
+      }
+      $selected_countries_by_name = substr($selected_countries_by_name,0,-1); 
+    }
+    else $selected_countries_by_name = $selected_countries;
+
+    $selected_countries_by_name = "/".$selected_countries_by_name."/i";
+    $magnitude_filter = variable_get('google_disaster_location_earthquakes_magnitude', 0);
+    if (!(file_exists($xmldata)) || (0 == filesize($xmldata))) {
+      variable_set('google_disaster_location_lat', 0);
+      variable_set('google_disaster_location_lng', 0);
+      $feed_link_value = variable_get('google_disaster_location_earthquakes_feeds', '');
+      if(!empty($feed_link_value))
+        drupal_set_message('Please, check your rss feed link, retrieved empty result or your temporary file with earthquakes data was deleted','error');
+    }
+    else
+    { 
+      $xml = simplexml_load_file($xmldata);
+      $namespaces = $xml->getNameSpaces(true);
+      if($count == NULL) {
+        $display_count = variable_get('google_disaster_location_earthquakes_count', 5000);
+        $counter = 0;
+        foreach ($xml->channel->item as $entry) {
+          if($counter >= $display_count) break;
+            $dfo = $entry->children($namespaces['geo']);
+            $dc = $entry->children($namespaces['dc']);
+            $dc_to_array = (array)$dc;
+            $tokenized_title = explode(", ",(string)$entry->title);
+            if(preg_match("$selected_countries_by_name", (string)$entry->title)) {
+              if(trim(preg_replace("/[^0-9\s.]/","",$tokenized_title[0])) >= $magnitude_filter) {
+                $data_parsed[] =  array('unixtime' => strtotime((string)$entry->pubDate),
+                                        'datetime' => (string)$entry->pubDate,
+                                        'Eqid' => (string)$entry->guid,
+                                        'Region' => (string)$entry->title,
+                                        'link'     => (string)$entry->link,
+                                        'Magnitude' => trim(preg_replace("/[^0-9\s.]/","",$tokenized_title[0])),
+                                        'Depth' => $dc_to_array['subject'][2],
+                                        'type' => 'earthquake',
+                                        'Lon' => (string)$dfo->long, 
+                                        'Lat'=> (string)$dfo->lat);
+                $counter++;
+              }
+            }
+          }
+        }
+      else
+      {
+        $counter = 0;
+        foreach ($xml->channel->item as $entry) {
+          if ($counter >= $count)break;
+          $dfo = $entry->children($namespaces['geo']);
+          $dc = $entry->children($namespaces['dc']);
+          $dc_to_array = (array)$dc;
+          $tokenized_title = explode(", ",(string)$entry->title);
+          if(preg_match("$selected_countries_by_name", (string)$entry->title)) {
+            if(trim(preg_replace("/[^0-9\s.]/","",$tokenized_title[0])) >= $magnitude_filter) {
+              $data_parsed[] =  array('datetime' => strtotime((string)$entry->pubDate),
+                                      'region' => (string)$entry->title,
+                                      'type' => 'Earthquake',
+                                      'lat'=> (string)$dfo->lat,
+                                      'lon' => (string)$dfo->long);
+              $counter++;
+            }
+          }
+        }
+      } 
+      variable_set('google_disaster_location_lat', $data_parsed[0]['lat']);
+      variable_set('google_disaster_location_lng', $data_parsed[0]['lon']);
+    }
+    return $data_parsed;
+  }
+}
+
+/*
+* Reading from rss floods data
+*/
+function get_floods_info($count = NULL) {
+  $xmldata = variable_get('google_disaster_location_path_to_floods_data', '');
+  if(!empty($xmldata)) {
+  $magnitude_filter = variable_get('google_disaster_location_floods_magnitude', '2');
+  $all_countries = get_countries();
+  $selected_countries = variable_get('google_disaster_location_floods_filter_by_countries', '*');
+  $data_parsed = array();
+  $selected_countries_by_name = NULL;
+  if($selected_countries != '*') {
+    foreach($selected_countries as $key) {
+      if($key == 'US') {
+        $usa_states = implode("|", get_usa_states());
+        $selected_countries_by_name .= $usa_states.'|';
+      }
+      $selected_countries_by_name .= addslashes($all_countries[$key])."|";
+    }
+    $selected_countries_by_name = substr($selected_countries_by_name, 0, -1); 
+  }
+  else $selected_countries_by_name = $selected_countries;
+  $selected_countries_by_name = "/".$selected_countries_by_name."/i";
+  if (!(file_exists($xmldata)) || (0 == filesize($xmldata))) {
+    variable_set('google_disaster_location_lat', 0);
+    variable_set('google_disaster_location_lng', 0);
+    $feed_link_value = variable_get('google_disaster_location_floods_feeds', '');
+    if(!empty($feed_link_value))
+      drupal_set_message('Please, check your rss feed link, retrieved empty result or your temporary file with floods data was deleted','error');
+  }
+  else
+  {
+  $xml = simplexml_load_file($xmldata);
+  $namespaces = $xml->getNameSpaces(true);
+  $display_count = variable_get('google_disaster_location_floods_count', 5000);
+  if($count != NULL) {
+  $counter = 0;
+  foreach ($xml->channel->item as $entry) {
+    if ($counter >= $count)break;
+      $dfo = $entry->children($namespaces['dfo']);
+      if(preg_match("$selected_countries_by_name", (string)$dfo->country)) {
+        if((string)$dfo->magnitude >= $magnitude_filter) {
+          $data_parsed[] =  array('datetime' => strtotime((string)$entry->pubDate),
+                                  'region' => (string)$dfo->country,
+                                  'type' => 'Flood',
+                                  'lon' => (string)$dfo->longitude,
+                                  'lat'=> (string)$dfo->latitude);
+          $counter++;
+        }
+      }
+    }      
+  }
+  else {
+  $counter = 0;
+  foreach ($xml->channel->item as $entry) {
+    if ($counter >= $display_count)break;
+      $dfo = $entry->children($namespaces['dfo']);
+      if(preg_match("$selected_countries_by_name", (string)$dfo->country)) {
+        if((string)$dfo->magnitude >= $magnitude_filter) {
+          $data_parsed[] =  array( 'unixtime' => strtotime((string)$entry->pubDate),
+                                   'datetime' => (string)$entry->pubDate,
+                                   'title' => (string)$entry->title,
+                                   'description' => (string)$entry->description.'',
+                                   'link' => (string)$entry->link,
+                                   'ID' => (string)$dfo->ID,
+                                   'country' => (string)$dfo->country,
+                                   'locations' => (string)$dfo->locations,
+                                   'began'=> (string)$dfo->began,
+                                   'ended'=> (string)$dfo->ended,
+                                   'dead' => (string)$dfo->dead,
+                                   'displaced' => (string)$dfo->displaced,
+                                   'main_cause' => (string)$dfo->main_cause,
+                                   'sqkm' => (string)$dfo->sqkm,
+                                   'magnitude' => (string)$dfo->magnitude,
+                                   'type' => 'flood',
+                                   'longitude' => (string)$dfo->longitude,
+                                   'latitude'=> (string)$dfo->latitude);
+            $counter++;
+          }
+        }
+      }
+    }
+  }
+  }
+  return $data_parsed;
+}
+
+/* 
+* Reading from rss volcanoes data
+*/
+function get_volcanoes_info($count = NULL) {
+  $xmldata = variable_get('google_disaster_location_path_to_volcanoes_data', '');
+  if(!empty($xmldata))
+  {
+    $all_countries = get_countries();
+    $selected_countries = variable_get('google_disaster_location_volcanoes_filter_by_countries', '*');
+    $data_parsed = array();
+    $selected_countries_by_name = NULL;
+    if($selected_countries != '*') {
+      foreach($selected_countries as $key) {
+        if($key == 'US') {
+          $usa_states = implode("|", get_usa_states());
+          $selected_countries_by_name .= $usa_states.'|';
+        }
+        $selected_countries_by_name .= addslashes($all_countries[$key])."|";
+      }
+      $selected_countries_by_name = substr($selected_countries_by_name,0,-1); 
+    }
+    else $selected_countries_by_name = $selected_countries;
+
+    $selected_countries_by_name = "/".$selected_countries_by_name."/i";
+    $magnitude_filter = variable_get('google_disaster_location_volcanoes_magnitude', 0);
+    if (!(file_exists($xmldata)) || (0 == filesize($xmldata))) {
+      $feed_link_value = variable_get('google_disaster_location_volcanoes_feeds', '');
+      if(!empty($feed_link_value))
+        drupal_set_message('Please, check your rss feed link, retrieved empty result or your temporary file with volcanoes data was deleted','error');
+    }
+    else
+    { 
+      $xml = simplexml_load_file($xmldata);
+      $namespaces = $xml->getNameSpaces(true);
+      if($count == NULL) {
+        $display_count = variable_get('google_disaster_location_volcanoes_count', 5000);
+        $counter = 0;
+        foreach ($xml->channel->item as $entry) {
+          if($counter >= $display_count) break;
+            $georss = explode(' ',$entry->children($namespaces['georss']));
+            $tokenized_title = explode("-",(string)$entry->title);
+            if(preg_match("$selected_countries_by_name", (string)$entry->title)) {
+                $data_parsed[] =  array( 'unixtime' => strtotime((string)$entry->pubDate),
+                                         'datetime' => (string)$entry->pubDate,
+                                         'Eqid' => (string)$entry->guid,
+                                         'title' => $tokenized_title[0],
+                                         'link'     => (string)$entry->link,
+                                         'description'     => (string)$entry->description,
+                                         'type' => 'volcano',
+                                         'Lat' => (string)$georss[0], 
+                                         'Lon'=> (string)$georss[1]);
+                $counter++;
+            }
+          }
+        }
+      else
+      {
+        $counter = 0;
+        foreach ($xml->channel->item as $entry) {
+          if ($counter >= $count)break;
+          $georss = explode(' ',$entry->children($namespaces['georss']));
+          $tokenized_title = explode("-",(string)$entry->title);
+          if(preg_match("$selected_countries_by_name", (string)$entry->title)) {
+              $data_parsed[] =  array('datetime' => strtotime((string)$entry->pubDate),
+                                      'region' => $tokenized_title[0],
+                                      'type' => 'Volcano',
+                                      'lat' => (string)$georss[0], 
+                                      'lon' => (string)$georss[1]);
+              $counter++;
+          }
+        }
+      } 
+    }
+    return $data_parsed;
+  }
+}
+
+/* 
+*
+*/
+function get_feeds() {
+  $xmldata_earthquakes = "/earthquakestmp.xml";
+  $xmldata_floods = "/floodstmp.xml";
+  $xmldata_volcanoes = "/volcanoestmp.xml";
+  $path_to_tmp = file_directory_temp();
+
+  $display_earthquakes = variable_get('google_disaster_location_type_earthquakes', 0);
+  $display_floods = variable_get('google_disaster_location_type_floods', 0);
+  $display_volcanoes = variable_get('google_disaster_location_type_volcanoes', 0);
+
+  $feed = variable_get('google_disaster_location_earthquakes_feeds', '');
+  if(!empty($feed) && ($display_earthquakes == 1)) {
+    $data = file_put_contents($path_to_tmp.$xmldata_earthquakes, file_get_contents(variable_get('google_disaster_location_earthquakes_feeds', '')));
+    variable_set('google_disaster_location_path_to_earthquakes_data', $path_to_tmp.$xmldata_earthquakes);
+  }
+  $feed = variable_get('google_disaster_location_floods_feeds', '');
+  if(!empty($feed) && ($display_floods == 1)) {
+    $data = file_put_contents($path_to_tmp.$xmldata_floods, file_get_contents(variable_get('google_disaster_location_floods_feeds', '')));
+    variable_set('google_disaster_location_path_to_floods_data', $path_to_tmp.$xmldata_floods);
+  }
+  $feed = variable_get('google_disaster_location_volcanoes_feeds', '');
+  if(!empty($feed) && ($display_volcanoes == 1)) {
+    $data = file_put_contents($path_to_tmp.$xmldata_volcanoes, file_get_contents(variable_get('google_disaster_location_volcanoes_feeds', '')));
+    variable_set('google_disaster_location_path_to_volcanoes_data', $path_to_tmp.$xmldata_volcanoes);
+  }
+}
+
+/* 
+*
+*/
+function google_disaster_location_update() {
+  get_feeds();
+  $block_data = (object)module_invoke('google_disaster_location', 'block', 'view', 'image');
+  $block_data = theme('block', $block_data);
+  $block_data = array('html' => $block_data);
+  print drupal_to_js($block_data);
+  exit();
+}
+
+/**
+ * Implementation of hook_block().
+ *
+ * Generates block for the location as a static image linked to the full google_disaster_location page.
+ */
+function google_disaster_location_block($op = 'list', $delta = 0, $edit = array()) {
+  // The $op parameter determines what piece of information is being requested.
+  switch ($op) {
+    case 'list':
+      $blocks['image']['info'] = t('World disaster location block');
+      return $blocks;
+    case 'configure': 
+      $form = array();
+      $form['info']['google_disaster_location_texttop_filter']['google_disaster_location_texttop'] = array(
+        '#type' => 'textarea',
+        '#title' => t('Additional text to show above the image'),
+        '#default_value' => variable_get('google_disaster_location_block_text_top', '')
+      );
+      $form['info']['google_disaster_location_texttop_filter']['format'] = filter_form(FILTER_FORMAT_DEFAULT, null, $parents=array('info', 'google_disaster_location_texttop_filter','format'));
+      return $form; 
+      break;
+    case 'save':
+      variable_set('google_disaster_location_block_text_top', $edit['google_disaster_location_texttop']);
+      break;
+    case 'view':
+      switch ($delta) {
+        case 'image':
+          global $base_url;
+          $texttop = variable_get('google_disaster_location_block_text_top', '');
+          $texttop = ($texttop == true) ? '<div id="google_disaster_location-block-text-top">'.variable_get('google_disaster_location_block_top_text', '').'</div>' : '';
+          $display_earthquakes = variable_get('google_disaster_location_type_earthquakes', 0);
+          $display_floods = variable_get('google_disaster_location_type_floods', 0);
+          $display_volcanoes = variable_get('google_disaster_location_type_volcanoes', 0);
+          $block['subject'] = variable_get('google_disaster_location_title', t('World Recent Disasters'));
+          $block['content'] = $texttop.$block['content'];
+          $block['content'] .= theme('google_disaster_location_block_links');
+          $block['content'] = google_disaster_location_block_image().$block['content'];
+          $block_refresh_time = variable_get('google_disaster_location_earthquakes_block_refresh', '60');
+          drupal_add_js('function autoupdate() {
+            $.ajax(
+            {
+                type: "POST",
+                url: "'.$base_url.'/google_disaster_location/update",
+                cache: false,
+                success: function(data) {
+                var result = Drupal.parseJson(data);
+                var block = result["html"];
+                $("#block-google_disaster_location-image").fadeIn("slow").html(block);
+                
+                }
+            });
+          }
+          if( Drupal.jsEnabled ) {
+            $(document).ready(function() {
+            setInterval("autoupdate()", '. $block_refresh_time * 60000 .');
+            });}', 'inline');
+          break;
+    }
+    return $block;
+  }
+}
+
+/* */
+function google_disaster_location_static_image_url($w = 200, $h = 150) {
+  $lat = variable_get('google_disaster_location_lat', 0);
+  $lon = variable_get('google_disaster_location_lng', 0);
+  $map_type = variable_get('google_disaster_location_type', 'roadmap');
+  $image_url = 'http://maps.google.com/maps/api/staticmap?zoom=1';// . variable_get('google_disaster_location_zoom', 10);
+  $image_url .= "&amp;size={$w}x{$h}&amp;maptype=$map_type&amp;sensor=false";
+  if(($lat != 0) && ($lon != 0))
+    $image_url .= '&amp;markers=' . $lat . ','. $lon;//color:0xFF00CC%7Clabel:E%7C
+  return($image_url);
+}
+
+/* */
+function google_disaster_location_block_image() {
+  return theme('google_disaster_location_block_image_link');
+}
+
+/**
+ * Format static image for display in the block.
+ *
+ * @ingroup themeable
+ */
+function theme_google_disaster_location_block_image_link() {
+  $width = variable_get('google_disaster_location_block_map_width', '200');
+  $height = variable_get('google_disaster_location_block_map_height', '150');
+  return(l('<img src="' . google_disaster_location_static_image_url($width, $height) . '" alt="Disaster location map" />', 'google_disaster_location', array('html' => TRUE)));
+}
+
+/**
+ * Format div for display Google Maps in it.
+ *
+ * @ingroup themeable
+ */
+function theme_google_disaster_location_map() {
+  $width = variable_get('google_disaster_location_width', '800') . 'px';
+  $height = variable_get('google_disaster_location_height', '600') . 'px';
+  return ('<div id="google_disaster_location_map" style="width: ' . $width . '; height: ' . $height . '"></div>');
+}
+
+/**
+ * Format div for display links in it.
+ *
+ * @ingroup themeable
+ */
+function theme_google_disaster_location_block_links() {
+  $display_earthquakes = variable_get('google_disaster_location_type_earthquakes', 0);
+  $display_floods = variable_get('google_disaster_location_type_floods', 0);
+  $display_volcanoes = variable_get('google_disaster_location_type_volcanoes', 0);
+  $eurquakes_data = $floods_data = $volcanoes_data = array();
+  if($display_earthquakes)
+    $eurquakes_data = get_earthrquakes_info(variable_get('google_disaster_location_earthquakes_count_link', '5'));
+  if($display_floods)
+    $floods_data = get_floods_info(variable_get('google_disaster_location_floods_count_link', '5'));
+  if($display_volcanoes)
+    $volcanoes_data = get_volcanoes_info(variable_get('google_disaster_location_volcanoes_count_link', '5'));
+
+  $disasters = array_merge($eurquakes_data, $floods_data, $volcanoes_data);
+  if(count($disasters)==0) {
+    if(drupal_get_path_alias(check_plain($_GET['q'])) == 'google_disaster_location')
+      drupal_set_message('No recent disasters to show', 'info');
+    return '<p>No recent disasters to show</p>';
+  }
+  rsort($disasters);
+  variable_set('google_disaster_location_lat', $disasters[0]['lat']); //setting last disaster for map centering to last
+  variable_set('google_disaster_location_lng', $disasters[0]['lon']);
+  $links = '<table style="font-size:10px" cellpadding="2"><tr><th>Disaster</th><th>Region</th><th>Date</th></tr>';
+  for($i = 0; $i < count($disasters); $i++) {
+    $links .= '<tr '. (($i % 2 != 1) ? 'bgcolor="#D1DCB2"' : '').'><td><li>'.$disasters[$i]['type'].'</li></td><td>'.l($disasters[$i]['region'], "google_disaster_location/". $disasters[$i]['lat'] . "/" . $disasters[$i]['lon']).'</td><td>'.date('d/m/y', $disasters[$i]['datetime']).'</td></tr>';
+  }
+  return $links .= '</table>';
+}
+/**
+ * Implementation of hook_theme().
+ */
+function google_disaster_location_theme() {
+  return array(
+    'google_disaster_location_block_image_link' => array(),
+    'google_disaster_location_block_links' => array(),
+    'google_disaster_location_map' => array(),
+  );
+}
