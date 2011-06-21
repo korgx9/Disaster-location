@@ -1,0 +1,10 @@
+Recent Disasters Location
+
+**Installation:
+1. Unpack the Recent Disasters Location folder and contents in the modules directory of your Drupal installation (usually /sites/all/modules).
+2. Enable the Recent Disasters Location module in the administration tools (http://yoursite.com/admin/build/modules).
+3. If you're not using Drupal's default administrative account, make sure your user account has the "administer Recent Disaster Location" permission (http://yoursite.com/admin/user/permissions).
+4. Goto configuration page (http://yoursite.com/admin/settings/google_disaster_location
+5. Choose disaster to display and save settings
+6. Configure disaster settings in colapsed fieldsets and save it again.
+7. You can add module block in blocks section 
