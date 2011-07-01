@@ -27,10 +27,6 @@ function initialize() {
     map.setCenter(new google.maps.LatLng(Drupal.settings.map_config.Lat, Drupal.settings.map_config.Lon));
     map.setZoom(10);
   }
-  else if(Drupal.settings.earthquakes_data[0].Lat != 'undefined') {
-    map.setCenter(new google.maps.LatLng(Drupal.settings.earthquakes_data[0].Lat, Drupal.settings.earthquakes_data[0].Lon));
-    map.setZoom(parseInt(Drupal.settings.map_config.zoom));//Get center to the latest disaster ONLY eargtquakes TODO for all
-  }
   else {
     map.setCenter(new google.maps.LatLng(0, 0)); //Nothing to show map cenetr gets param (0, 0) 
     map.setZoom(parseInt(Drupal.settings.map_config.zoom));

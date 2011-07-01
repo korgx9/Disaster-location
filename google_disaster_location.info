@@ -1,4 +1,3 @@
-; $Id$ 
 name = Google disaster location
 description = Display recent disasters location via Google Maps.
 package = Location
