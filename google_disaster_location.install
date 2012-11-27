@@ -1,5 +1,4 @@
 <?php
-// $Id$
 /**
  * @file
  * Install, uninstall functions for the google_disaster_location module.
